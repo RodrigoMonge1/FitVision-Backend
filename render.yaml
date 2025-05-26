@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: fitvision-backend
+    env: python
+    plan: free
+    buildCommand: ""
+    startCommand: gunicorn app:app
+    envVars:
+      - key: SUPABASE_URL
+        value: https://uezdldbsxoqzwpbslhob.supabase.co
+      - key: SUPABASE_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVlemRsZGJzeG9xendwYnNsaG9iIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwMzI1NywiZXhwIjoyMDYzNzc5MjU3fQ.vD-ByIgei8Gnw_FSptAAw-zFFy7anDLA3YsvL2k_g1Y
