@@ -13,8 +13,8 @@ import os
 app = Flask(__name__)
 
 # Inicializa Supabase
-SUPABASE_URL = os.environ.get("https://uezdldbsxoqzwpbslhob.supabase.co")
-SUPABASE_KEY = os.environ.get("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVlemRsZGJzeG9xendwYnNsaG9iIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwMzI1NywiZXhwIjoyMDYzNzc5MjU3fQ.vD-ByIgei8Gnw_FSptAAw-zFFy7anDLA3YsvL2k_g1Y")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 SUPABASE_BUCKET = "imagenes"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
