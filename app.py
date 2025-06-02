@@ -9,6 +9,7 @@ import pandas as pd
 from datetime import datetime
 from supabase import create_client, Client
 import os
+import time
 
 # Configura tus credenciales de Supabase
 SUPABASE_URL = "https://uezdldbsxoqzwpbslhob.supabase.co"
@@ -59,29 +60,30 @@ def calcular_proporciones(landmarks):
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
+        tiempo_inicio = time.time()  # ⏱️ Inicia el contador
+
         data = request.get_json()
         image_data = data["image"]
         sexo = data.get("sex", "Desconocido")
 
-        # Decodificar imagen
         decoded_data = base64.b64decode(image_data)
         np_arr = np.frombuffer(decoded_data, np.uint8)
         img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
-        # Procesar imagen con MediaPipe
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         result = pose.process(img_rgb)
 
         if not result.pose_landmarks:
             return jsonify({"error": "No se detectaron landmarks"}), 400
 
-        # Calcular proporciones
         proporciones = calcular_proporciones(result.pose_landmarks.landmark)
         df = pd.DataFrame([proporciones])
         pred = modelo.predict(df)[0]
         proba = modelo.predict_proba(df).max()
 
-        # Guardar imagen en Supabase (bucket privado)
+        tiempo_fin = time.time()
+        tiempo_procesamiento = tiempo_fin - tiempo_inicio  # Tiempo en segundos
+
         nombre_imagen = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_img:
             cv2.imwrite(temp_img.name, img)
@@ -89,12 +91,12 @@ def predict():
                 supabase.storage.from_(SUPABASE_BUCKET).upload(
                     path=nombre_imagen,
                     file=f,
-                    file_options={"content-type": "image/jpeg", "x-upsert": "true"}  # cadena, no booleano
+                    file_options={"content-type": "image/jpeg", "x-upsert": "true"}
                 )
 
         imagen_url = f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_BUCKET}/{nombre_imagen}"
 
-        # Insertar en la base de datos
+        #Insertar todos los datos
         supabase.table("registros").insert({
             "sex": sexo,
             "label": pred,
@@ -105,13 +107,11 @@ def predict():
             "brazo_altura_ratio": proporciones["brazo_altura_ratio"],
             "pierna_altura_ratio": proporciones["pierna_altura_ratio"],
             "hombro_torso_ratio": proporciones["hombro_torso_ratio"],
-            "imagen": imagen_url
+            "imagen": imagen_url,
+            "tiempo_procesamiento": round(tiempo_procesamiento, 4)  #Ejemplo: 0.5231 segundos
         }).execute()
 
         return jsonify({"somatotipo": pred})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=5000, debug=True)
