@@ -25,5 +25,5 @@ y_pred = modelo.predict(X_test)
 print(classification_report(y_test, y_pred))
 
 # Guardar modelo
-joblib.dump(modelo, "modelo_somatotipos_v3.pkl")
-print("Modelo entrenado y guardado como modelo_somatotipos_v3.pkl")
+joblib.dump(modelo, "modelo_somatotipos_v2.pkl")
+print("Modelo entrenado y guardado como modelo_somatotipos.pkl")
