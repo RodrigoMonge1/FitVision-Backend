@@ -1,26 +1,23 @@
 FROM python:3.10-slim
 
-# Instala dependencias del sistema necesarias para OpenCV y Mediapipe
-RUN apt-get update && apt-get install -y \
+# Deps mínimas para OpenCV/Mediapipe en servidores
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
     libglib2.0-0 \
-    libsm6 \
-    libxrender1 \
-    libxext6 \
-    libgl1-mesa-glx \
-    && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 
-# Crea directorio de trabajo
 WORKDIR /app
 
-# Copia archivos del proyecto
-COPY . /app
+# Instala deps primero (mejor cache)
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir -r requirements.txt
 
-# Instala dependencias de Python
-RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
+# Copia el código (incluye el .pkl)
+COPY . .
 
-# Expone el puerto 8080
+ENV PORT=8080
 EXPOSE 8080
 
-# Comando para ejecutar tu app con gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]
+# Gunicorn (ajusta workers/threads si tu instancia es pequeña)
+CMD ["gunicorn", "-w", "1", "-k", "gthread", "--threads", "2", "-b", "0.0.0.0:8080", "app:app"]
