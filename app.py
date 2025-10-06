@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import mediapipe as mp
 import cv2
 import numpy as np
@@ -11,15 +12,21 @@ from supabase import create_client, Client
 import os
 import time
 
-# Configura tus credenciales de Supabase
-SUPABASE_URL = "https://uezdldbsxoqzwpbslhob.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVlemRsZGJzeG9xendwYnNsaG9iIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwMzI1NywiZXhwIjoyMDYzNzc5MjU3fQ.vD-ByIgei8Gnw_FSptAAw-zFFy7anDLA3YsvL2k_g1Y"  # Sustituye por tu clave service_role si es backend
-SUPABASE_BUCKET = "imagenes"
+# --------- Config ----------
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE")  # SOLO backend
+SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "imagenes")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("Faltan SUPABASE_URL o SUPABASE_SERVICE_ROLE en variables de entorno.")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Inicializa Flask y modelos
+# --------- App ----------
 app = Flask(__name__)
+CORS(app)  # si tienes front aparte; si no, puedes quitarlo
+
+# Carga del modelo (ajusta el nombre si cambia)
 modelo = joblib.load("modelo_somatotipos_v2.pkl")
 
 mp_pose = mp.solutions.pose
@@ -57,17 +64,25 @@ def calcular_proporciones(landmarks):
         "hombro_torso_ratio": hombros / torso if torso != 0 else 0
     }
 
-@app.route('/predict', methods=['POST'])
+@app.get("/")
+def root():
+    return {"ok": True}
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+@app.post('/predict')
 def predict():
     try:
-        tiempo_inicio = time.time()  # ⏱️ Inicia el contador
+        t0 = time.time()
 
-        data = request.get_json()
+        data = request.get_json(force=True)
         image_data = data["image"]
         sexo = data.get("sex", "Desconocido")
 
-        decoded_data = base64.b64decode(image_data)
-        np_arr = np.frombuffer(decoded_data, np.uint8)
+        decoded = base64.b64decode(image_data)
+        np_arr = np.frombuffer(decoded, np.uint8)
         img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -76,42 +91,46 @@ def predict():
         if not result.pose_landmarks:
             return jsonify({"error": "No se detectaron landmarks"}), 400
 
-        proporciones = calcular_proporciones(result.pose_landmarks.landmark)
-        df = pd.DataFrame([proporciones])
+        props = calcular_proporciones(result.pose_landmarks.landmark)
+        df = pd.DataFrame([props])
+
         pred = modelo.predict(df)[0]
-        proba = modelo.predict_proba(df).max()
+        proba = float(np.max(modelo.predict_proba(df)))
 
-        tiempo_fin = time.time()
-        tiempo_procesamiento = tiempo_fin - tiempo_inicio  # Tiempo en segundos
-
-        nombre_imagen = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_img:
-            cv2.imwrite(temp_img.name, img)
-            with open(temp_img.name, "rb") as f:
+        # --- subir imagen a Storage ---
+        nombre_imagen = f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S%f')}.jpg"
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            cv2.imwrite(tmp.name, img)
+            with open(tmp.name, "rb") as f:
                 supabase.storage.from_(SUPABASE_BUCKET).upload(
                     path=nombre_imagen,
                     file=f,
                     file_options={"content-type": "image/jpeg", "x-upsert": "true"}
                 )
 
+        # Si el bucket es público, la URL directa sirve:
         imagen_url = f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_BUCKET}/{nombre_imagen}"
 
-        #Insertar todos los datos
+        # --- guardar registro ---
         supabase.table("registros").insert({
             "sex": sexo,
             "label": pred,
-            "precision": float(proba),
-            "shoulder_waist_ratio": proporciones["shoulder_waist_ratio"],
-            "leg_height_ratio": proporciones["leg_height_ratio"],
-            "torso_height_ratio": proporciones["torso_height_ratio"],
-            "brazo_altura_ratio": proporciones["brazo_altura_ratio"],
-            "pierna_altura_ratio": proporciones["pierna_altura_ratio"],
-            "hombro_torso_ratio": proporciones["hombro_torso_ratio"],
+            "precision": proba,
+            "shoulder_waist_ratio": props["shoulder_waist_ratio"],
+            "leg_height_ratio": props["leg_height_ratio"],
+            "torso_height_ratio": props["torso_height_ratio"],
+            "brazo_altura_ratio": props["brazo_altura_ratio"],
+            "pierna_altura_ratio": props["pierna_altura_ratio"],
+            "hombro_torso_ratio": props["hombro_torso_ratio"],
             "imagen": imagen_url,
-            "tiempo_procesamiento": round(tiempo_procesamiento, 4)  #Ejemplo: 0.5231 segundos
+            "tiempo_procesamiento": round(time.time() - t0, 4)
         }).execute()
 
-        return jsonify({"somatotipo": pred})
+        return jsonify({"somatotipo": pred, "precision": proba, "imagen": imagen_url})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# Para desarrollo local (en Koyeb ejecuta gunicorn desde Dockerfile)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
